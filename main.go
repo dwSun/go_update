@@ -70,13 +70,12 @@ func main() {
 			DeCompress(latest_gz)
 
 			fmt.Println("Update Finished")
-			PrintPathSet()
 
 		} else {
 			fmt.Printf("Latest Version [%s]. Current [%s]. Skip\n", ver_latest, ver_current)
 		}
 	}
-	fmt.Println()
+	PrintPathSet()
 }
 
 func PrintPathSet() {
