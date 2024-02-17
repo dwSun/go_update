@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,17 +14,89 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/schollz/progressbar/v3"
 )
 
 var src = "https://go.dev/dl/"
 var host = "https://go.dev"
 
+var os_str = runtime.GOOS
+var arch_str = runtime.GOARCH
+
 func main() {
-	resp, err := http.Get(src)
+	fmt.Println("Current OS: " + os_str)
+	fmt.Println("Current Arch: " + arch_str)
+
+	suffix := fmt.Sprintf(".%s-%s.tar.gz", os_str, arch_str)
+
+	ver_latest, sha, err := GotLatestVersion()
+
 	if err != nil {
 		fmt.Println(err)
 		return
+	}
+
+	ver_current := GetCurrent()
+
+	if ver_current != ver_latest {
+		fmt.Printf("New Version [%s] Found! Current [%s]\n", ver_latest, ver_current)
+		// 暂停5秒
+		time.Sleep(5 * time.Second)
+
+		latest_gz := ver_latest + suffix
+		latest_url := src + latest_gz
+		fmt.Println("Download " + latest_url)
+
+		if FileExist(latest_gz) && CheckSHA256(latest_gz, sha) {
+			//file OK
+		} else {
+			err := downloadFile(latest_gz, latest_url)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Println("Download Finished")
+		}
+		os.RemoveAll("go")
+		DeCompress(latest_gz)
+
+		fmt.Println("Update Finished")
+
+	} else {
+		fmt.Printf("Latest Version [%s]. Current [%s]. Skip\n", ver_latest, ver_current)
+	}
+	PrintPathSet()
+}
+
+func CheckSHA256(latest_gz string, sha string) bool {
+	file, err := os.Open(latest_gz)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	defer file.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, file); err != nil {
+		fmt.Println(err)
+		return false
+	}
+
+	if fmt.Sprintf("%x", h.Sum(nil)) == sha {
+		fmt.Println("SHA256 Check Passed")
+		return true
+	} else {
+		fmt.Println("SHA256 Check Failed")
+		os.Remove(latest_gz)
+		return false
+	}
+}
+
+func GetIndexSrc() ([]byte, error) {
+	resp, err := http.Get(src)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
 	}
 
 	defer resp.Body.Close()
@@ -31,51 +104,9 @@ func main() {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println(err)
-		return
+		return nil, err
 	}
-	// 判断当前系统是 linux 还是mac
-	os_str := runtime.GOOS
-	fmt.Println("Current OS: " + os_str)
-	arch_str := runtime.GOARCH
-	fmt.Println("Current Arch: " + arch_str)
-
-	suffix := fmt.Sprintf(".%s-%s.tar.gz", os_str, arch_str)
-
-	r, _ := regexp.Compile(`/dl/(go[\d+][\.\d+]*)` + suffix)
-	match := r.MatchString(string(body))
-	if match {
-		strs := r.FindStringSubmatch(string(body))
-		ver_current := GetCurrent()
-
-		ver_latest := strs[1]
-		if ver_current != ver_latest {
-			fmt.Printf("New Version [%s] Found! Current [%s]\n", ver_latest, ver_current)
-			// 暂停5秒
-			time.Sleep(5 * time.Second)
-			latest_url := host + strs[0]
-			fmt.Println("Download " + latest_url)
-
-			latest_gz := ver_latest + suffix
-
-			if FileExist(latest_gz) {
-				fmt.Println("File Exist")
-			} else {
-				err := downloadFile(latest_gz, latest_url)
-				if err != nil {
-					panic(err)
-				}
-				fmt.Println("Download Finished")
-			}
-			os.RemoveAll("go")
-			DeCompress(latest_gz)
-
-			fmt.Println("Update Finished")
-
-		} else {
-			fmt.Printf("Latest Version [%s]. Current [%s]. Skip\n", ver_latest, ver_current)
-		}
-	}
-	PrintPathSet()
+	return body, err
 }
 
 func PrintPathSet() {
@@ -174,4 +205,59 @@ func createFile(name string) (*os.File, error) {
 		return nil, err
 	}
 	return os.Create(name)
+}
+
+func GotLatestVersion() (string, string, error) {
+
+	body, err := GetIndexSrc()
+	if err != nil {
+		return "", "", err
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		panic(err)
+	}
+
+	archive_suffix := fmt.Sprintf(".%s-%s.tar.gz", os_str, arch_str)
+	r_archive, _ := regexp.Compile(`/dl/(go[\d+][\.\d+]*)` + archive_suffix)
+
+	ver := ""
+	sha256 := ""
+
+	doc.Find("table").Each(func(i int, s *goquery.Selection) {
+		s.Find("tr").Each(func(i int, s *goquery.Selection) {
+
+			theHTml, err := s.Html()
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+
+			if strings.Contains(theHTml, "Archive") {
+				match_archive := r_archive.MatchString(string(theHTml))
+				if match_archive {
+					strs := r_archive.FindStringSubmatch(string(theHTml))
+
+					if ver == "" {
+						ver = strs[1]
+						fmt.Println("Current Version: " + ver)
+
+					}
+
+					s.Find("tt").Each(func(i int, s *goquery.Selection) {
+						if sha256 == "" {
+							sha256 = s.Text()
+							fmt.Println("SHA256: " + sha256)
+						}
+					})
+
+					return
+				}
+			}
+		})
+	})
+
+	return ver, sha256, nil
+
 }
