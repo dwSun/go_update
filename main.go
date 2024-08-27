@@ -18,8 +18,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-var src = "https://go.dev/dl/"
-var host = "https://go.dev"
+var src = "https://golang.google.cn/dl/"
 
 var os_str = runtime.GOOS
 var arch_str = runtime.GOARCH
