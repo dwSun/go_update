@@ -315,4 +315,7 @@ func printEnvHints() {
 	fmt.Println("export PATH=$GOPATH/bin:$PATH")
 	fmt.Println("export GO111MODULE=auto")
 	fmt.Println("export GOPROXY=https://goproxy.cn,direct")
+	fmt.Println("go install github.com/gogf/gf/cmd/gf/v2@latest")
+	fmt.Println("go install github.com/wailsapp/wails/v2/cmd/wails@latest")
+	fmt.Println("go install github.com/wailsapp/wails/v3/cmd/wails3@latest")
 }
